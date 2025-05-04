@@ -1,0 +1,15 @@
+# FILE: C:\...\gs-spring-boot\complete\k8s\k8s-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: sample-app-service
+spec:
+  selector:
+    app: sample-java-app # Selects pods managed by the deployment
+  ports:
+    - protocol: TCP
+      port: 80       # Port the service will listen on (external/internal)
+      targetPort: 8080 # Port on the pod the traffic should be forwarded to
+  # Creates an AWS Elastic Load Balancer (ELB).
+  # Use NodePort for simpler setups without an ELB (access via <NodeIP>:<NodePort>)
+  type: LoadBalancer

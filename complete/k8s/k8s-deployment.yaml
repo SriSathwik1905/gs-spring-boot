@@ -1,0 +1,25 @@
+# FILE: C:\...\gs-spring-boot\complete\k8s\k8s-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  # This name MUST match K8S_DEPLOYMENT_NAME in Jenkinsfile
+  name: sample-app-deployment
+  labels:
+    app: sample-java-app
+spec:
+  replicas: 2 # Run 2 instances of the application pod
+  selector:
+    matchLabels:
+      app: sample-java-app # Selects pods with this label
+  template: # Pod template
+    metadata:
+      labels:
+        app: sample-java-app # Label applied to pods
+    spec:
+      containers:
+      # This name MUST match K8S_CONTAINER_NAME in Jenkinsfile
+      - name: sample-container
+        # *** IMPORTANT: Use YOUR Docker Hub username and a placeholder tag ***
+        image: srisathwik195/sample-java-app:initial
+        ports:
+        - containerPort: 8080 # Port the application listens on inside the container
