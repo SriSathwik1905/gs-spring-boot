@@ -1,62 +1,40 @@
-// FILE: gs-spring-boot/complete/Jenkinsfile
-
 pipeline {
     agent any // Run on any available agent/node (our Jenkins master in this case)
 
     tools {
-        // *** CRITICAL ***
-        // These names MUST EXACTLY MATCH the names you configured
-        // in Jenkins -> Manage Jenkins -> Tools
-        maven 'Maven 3.9.9'    // Or 'Maven 3.8.1' if you used that name
-        jdk 'OpenJDK 17'       // Use the name you gave the JDK 17 configuration
+        maven 'Maven 3.9.9'       // Match name in Jenkins tool config
+        jdk 'OpenJDK 17'          // Match name in Jenkins tool config
     }
 
     environment {
-        // *** REPLACE PLACEHOLDER ***
-        // Replace 'yourdockerhubusername' with your actual Docker Hub username
-        DOCKER_HUB_USERNAME = "srisathwik195"
-        APP_NAME            = "sample-java-app" // Name for the Docker image and K8s resources
-        // BUILD_NUMBER is a built-in Jenkins variable
-        DOCKER_IMAGE        = "${DOCKER_HUB_USERNAME}/${APP_NAME}:${BUILD_NUMBER}"
+        DOCKER_HUB_USERNAME     = "srisathwik195"
+        APP_NAME                = "sample-java-app"
+        DOCKER_IMAGE            = "${DOCKER_HUB_USERNAME}/${APP_NAME}:${BUILD_NUMBER}"
 
-        // These values are read from files placed on the Jenkins server by setup steps
-        // Ensure /tmp/tf_outputs/ exists and is readable by the 'jenkins' user
-        AWS_REGION          = readFile('/tmp/tf_outputs/region.txt').trim()
-        EKS_CLUSTER_NAME    = readFile('/tmp/tf_outputs/eks_cluster_name.txt').trim()
+        AWS_REGION              = readFile('/tmp/tf_outputs/region.txt').trim()
+        EKS_CLUSTER_NAME        = readFile('/tmp/tf_outputs/eks_cluster_name.txt').trim()
+        KUBECONFIG_PATH         = "/var/lib/jenkins/.kube/config-${EKS_CLUSTER_NAME}"
 
-        // Path for the temporary kubeconfig file generated during the pipeline
-        KUBECONFIG_PATH     = "/var/lib/jenkins/.kube/config-${EKS_CLUSTER_NAME}"
+        AWS_CREDENTIALS_ID      = 'aws-creds'
+        DOCKER_CREDENTIALS_ID   = 'docker-hub-creds'
 
-        // *** CRITICAL ***
-        // These credential IDs MUST EXACTLY MATCH the IDs you created
-        // in Jenkins -> Manage Jenkins -> Credentials -> System -> Global
-        AWS_CREDENTIALS_ID  = 'aws-creds'        // ID for AWS Credentials
-        DOCKER_CREDENTIALS_ID = 'docker-hub-creds' // ID for Docker Hub Credentials
-        // Optional: Use 'github-pat' if your repo is private and needs checkout credentials
-        // GITHUB_CREDENTIALS_ID = 'github-pat'
-
-        // These names must match your k8s-deployment.yaml file
-        K8S_DEPLOYMENT_NAME = 'sample-app-deployment'
-        K8S_CONTAINER_NAME  = 'sample-container'
-     }
+        K8S_DEPLOYMENT_NAME     = 'sample-app-deployment'
+        K8S_CONTAINER_NAME      = 'sample-container'
+    }
 
     stages {
         stage('Preparation') {
             steps {
-                // Clean workspace before starting
                 cleanWs()
-
-                // Verify Terraform output files exist (basic check)
                 sh '''
                   echo "--- Preparation ---"
                   if [ ! -f /tmp/tf_outputs/region.txt ] || [ ! -f /tmp/tf_outputs/eks_cluster_name.txt ]; then
-                    echo "ERROR: Terraform output files (/tmp/tf_outputs/region.txt, /tmp/tf_outputs/eks_cluster_name.txt) not found on Jenkins server!"
-                    echo "Ensure you copied these files from where you ran 'terraform apply'."
+                    echo "ERROR: Terraform output files not found!"
                     exit 1
                   fi
                   echo "AWS Region: ${AWS_REGION}"
                   echo "EKS Cluster Name: ${EKS_CLUSTER_NAME}"
-                  echo "Docker Image to be built: ${DOCKER_IMAGE}"
+                  echo "Docker Image: ${DOCKER_IMAGE}"
                   echo "Using AWS Credentials ID: ${AWS_CREDENTIALS_ID}"
                   echo "Using Docker Hub Credentials ID: ${DOCKER_CREDENTIALS_ID}"
                   echo "-------------------"
@@ -67,51 +45,39 @@ pipeline {
         stage('Checkout Code') {
             steps {
                 echo "Checking out code from GitHub..."
-                // *** REPLACE PLACEHOLDER ***
-                // Replace 'your-username' with your actual GitHub username
-                // If your repository is PRIVATE, uncomment the credentialsId line
                 git url: 'https://github.com/SriSathwik1905/gs-spring-boot',
-                    branch: 'main' // Or your default branch name
-                    // credentialsId: GITHUB_CREDENTIALS_ID // Uncomment if private repo
-                
-                // We need to operate within the 'complete' subdirectory
+                    branch: 'main'
                 dir('complete') {
-                    // Stash all files in the 'complete' dir to use in later stages
                     stash includes: '**/*', name: 'source'
                 }
             }
         }
 
-         // Subsequent stages operate within the 'complete' directory context
-         stage('Build with Maven') {
-             steps {
-                 dir('complete') {
-                     unstash 'source' // Get the source code into the workspace for this stage
-                     echo "Building with Maven..."
-                     // Use the Maven tool defined in the 'tools' section
-                     // -DskipTests speeds up the pipeline for this example
-                     sh "mvn clean package -DskipTests"
-                 }
-             }
-         }
+        stage('Build with Maven') {
+            steps {
+                dir('complete') {
+                    unstash 'source'
+                    echo "Building with Maven..."
+                    sh "mvn clean package -DskipTests"
+                }
+            }
+        }
 
-         stage('Build Docker Image') {
-             steps {
-                 dir('complete') {
-                     unstash 'source' // Ensure Dockerfile and source are available
-                     echo "Building Docker image: ${DOCKER_IMAGE}"
-                     // Assumes target/*.jar exists from the Maven build stage
-                     sh "docker build -t ${DOCKER_IMAGE} ."
-                 }
-             }
-         }
+        stage('Build Docker Image') {
+            steps {
+                dir('complete') {
+                    unstash 'source'
+                    echo "Building Docker image: ${DOCKER_IMAGE}"
+                    sh "docker build -t ${DOCKER_IMAGE} ."
+                }
+            }
+        }
 
         stage('Push to Docker Hub') {
             steps {
                 dir('complete') {
                     echo "Pushing Docker image to Docker Hub..."
-                    // Use the Docker Hub credentials ID defined in environment vars
-                    withDockerRegistry(credentialsId: DOCKER_CREDENTIALS_ID) { // url can often be omitted for Docker Hub
+                    withDockerRegistry(credentialsId: DOCKER_CREDENTIALS_ID, url: 'https://index.docker.io/v1/') {
                         sh "docker push ${DOCKER_IMAGE}"
                     }
                 }
@@ -119,49 +85,37 @@ pipeline {
         }
 
         stage('Configure Kubectl') {
-             steps {
-                 echo "Configuring kubectl for cluster: ${EKS_CLUSTER_NAME} in region: ${AWS_REGION}"
-                 // Use the AWS credentials ID defined in environment vars
-                 withCredentials([aws(credentialsId: AWS_CREDENTIALS_ID)]) {
-                     // AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY (and AWS_SESSION_TOKEN if applicable)
-                     // are automatically available as environment variables within this block
-                     sh '''
-                       # Create directory for kubeconfig if it doesn't exist
-                       mkdir -p $(dirname ${KUBECONFIG_PATH})
-                       # Configure kubectl using AWS CLI V2 and the provided credentials
-                       aws eks update-kubeconfig --name ${EKS_CLUSTER_NAME} --region ${AWS_REGION} --kubeconfig ${KUBECONFIG_PATH}
-                       echo "kubectl configured. Verifying connection..."
-                       # Verify by listing nodes using the generated kubeconfig
-                       KUBECONFIG=${KUBECONFIG_PATH} kubectl get nodes
-                     '''
-                 }
-             }
-         }
+            steps {
+                echo "Configuring kubectl..."
+                withCredentials([aws(credentialsId: AWS_CREDENTIALS_ID)]) {
+                    sh '''
+                      mkdir -p $(dirname ${KUBECONFIG_PATH})
+                      aws eks update-kubeconfig --name ${EKS_CLUSTER_NAME} --region ${AWS_REGION} --kubeconfig ${KUBECONFIG_PATH}
+                      echo "kubectl configured. Verifying..."
+                      KUBECONFIG=${KUBECONFIG_PATH} kubectl get nodes
+                    '''
+                }
+            }
+        }
 
         stage('Deploy to Kubernetes') {
             steps {
                 dir('complete') {
-                     echo "Deploying image ${DOCKER_IMAGE} to Kubernetes deployment ${K8S_DEPLOYMENT_NAME}..."
-                     // Use the generated kubeconfig path for kubectl commands
-                     sh "KUBECONFIG=${KUBECONFIG_PATH} kubectl set image deployment/${K8S_DEPLOYMENT_NAME} ${K8S_CONTAINER_NAME}=${DOCKER_IMAGE} --record"
-                     echo "Waiting for deployment rollout to complete..."
-                     sh "KUBECONFIG=${KUBECONFIG_PATH} kubectl rollout status deployment/${K8S_DEPLOYMENT_NAME} --timeout=5m" // Added timeout
-                     echo "Deployment update initiated."
+                    echo "Deploying image to Kubernetes..."
+                    sh "KUBECONFIG=${KUBECONFIG_PATH} kubectl set image deployment/${K8S_DEPLOYMENT_NAME} ${K8S_CONTAINER_NAME}=${DOCKER_IMAGE} --record"
+                    echo "Waiting for rollout to complete..."
+                    sh "KUBECONFIG=${KUBECONFIG_PATH} kubectl rollout status deployment/${K8S_DEPLOYMENT_NAME} --timeout=5m"
+                    echo "Deployment update completed."
                 }
             }
         }
-    } // End of stages
+    }
 
     post {
         always {
-            // This block runs regardless of pipeline success or failure
             echo "Pipeline finished. Cleaning up..."
-            // Clean up the workspace
             cleanWs()
-            // Remove the temporary kubeconfig file
             sh "rm -f ${KUBECONFIG_PATH}"
         }
-        // You can add success {}, failure {}, etc. blocks here for notifications
-    } // End of post
-
-} // End of pipeline
+    }
+}
